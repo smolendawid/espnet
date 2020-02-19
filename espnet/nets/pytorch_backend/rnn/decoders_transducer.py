@@ -200,7 +200,7 @@ class DecoderRNNT(torch.nn.Module):
 
         """
         z_list, c_list = self.zero_state(h.unsqueeze(0))
-        ey = to_device(self, torch.zeros((1, self.embed_dim)))
+        ey = torch.zeros((1, self.embed_dim))
 
         hyp = {'score': 0.0, 'yseq': [self.blank]}
 
@@ -214,7 +214,7 @@ class DecoderRNNT(torch.nn.Module):
                 hyp['yseq'].append(int(pred))
                 hyp['score'] += float(logp)
 
-                eys = to_device(self, torch.full((1, 1), hyp['yseq'][-1], dtype=torch.long))
+                eys = torch.full((1, 1), hyp['yseq'][-1], dtype=torch.long)
                 ey = self.dropout_embed(self.embed(eys))
 
                 y, (z_list, c_list) = self.rnn_forward(ey[0], (z_list, c_list))
@@ -239,7 +239,7 @@ class DecoderRNNT(torch.nn.Module):
         normscore = recog_args.score_norm_transducer
 
         z_list, c_list = self.zero_state(h.unsqueeze(0))
-        eys = to_device(self, torch.zeros((1, self.embed_dim)))
+        eys = torch.zeros((1, self.embed_dim))
 
         _, (z_list, c_list) = self.rnn_forward(eys, None)
 
@@ -301,6 +301,15 @@ class DecoderRNNT(torch.nn.Module):
                 kept_hyps, key=lambda x: x['score'], reverse=True)[:nbest]
 
         return nbest_hyps
+
+    def log_softmax(self, hs_pad):
+        """log_softmax of frame activations
+
+        :param torch.Tensor hs_pad: 3d tensor (B, Tmax, eprojs)
+        :return: log softmax applied 3d tensor (B, Tmax, odim)
+        :rtype: torch.Tensor
+        """
+        return F.log_softmax(self.lin_out(hs_pad), dim=2)
 
 
 class DecoderRNNTAtt(torch.nn.Module):

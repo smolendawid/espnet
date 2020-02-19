@@ -74,6 +74,9 @@ def get_parser(parser=None, required=True):
     parser.add_argument('--num-encs', default=1, type=int,
                         help='Number of encoders in the model.')
     # loss related
+    parser.add_argument('--aligner', default='ctc', type=str,
+                        choices=['ctc', 'rnnt'],
+                        help='Type of CTC implementation to calculate loss.')
     parser.add_argument('--ctc_type', default='warpctc', type=str,
                         choices=['builtin', 'warpctc'],
                         help='Type of CTC implementation to calculate loss.')

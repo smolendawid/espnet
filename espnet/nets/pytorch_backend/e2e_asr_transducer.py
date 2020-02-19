@@ -134,7 +134,6 @@ class E2E(ASRInterface, torch.nn.Module):
         self.space = args.sym_space
         self.blank = args.sym_blank
         self.reporter = Reporter()
-        self.beam_size = args.beam_size
 
         # note that eos is the same as sos (equivalent ID)
         self.sos = odim - 1
@@ -261,12 +260,22 @@ class E2E(ASRInterface, torch.nn.Module):
         # 0. Frontend
         if self.frontend is not None:
             hs_pad, hlens, mask = self.frontend(to_torch_tensor(xs_pad), ilens)
-            hs_pad, hlens = self.feature_transform(hs_pad, hlens)
+            if isinstance(hs_pad, list):
+                hlens_n = [None] * self.num_spkrs
+                for i in range(self.num_spkrs):
+                    hs_pad[i], hlens_n[i] = self.feature_transform(hs_pad[i], hlens)
+                hlens = hlens_n
+            else:
+                hs_pad, hlens = self.feature_transform(hs_pad, hlens)
         else:
             hs_pad, hlens = xs_pad, ilens
 
-        # 1. encoder
-        hs_pad, hlens, _ = self.enc(hs_pad, hlens)
+        # 1. Encoder
+        if not isinstance(hs_pad, list):  # single-channel input xs_pad (single- or multi-speaker)
+            hs_pad, hlens, _ = self.enc(hs_pad, hlens)
+        else:  # multi-channel multi-speaker input xs_pad
+            for i in range(self.num_spkrs):
+                hs_pad[i], hlens[i], _ = self.enc(hs_pad[i], hlens[i])
 
         # 2. decoder
         loss = self.dec(hs_pad, hlens, ys_pad)
@@ -283,11 +292,7 @@ class E2E(ASRInterface, torch.nn.Module):
             batch_nbest = []
 
             for b in six.moves.range(batchsize):
-                if self.beam_size == 1:
-                    nbest_hyps = self.dec.recognize(hs_pad[b], self.recog_args)
-                else:
-                    nbest_hyps = self.dec.recognize_beam(hs_pad[b], self.recog_args)
-
+                nbest_hyps = self.dec.recognize_beam(hs_pad[b], self.recog_args)
                 batch_nbest.append(nbest_hyps)
 
             y_hats = [nbest_hyp[0]['yseq'][1:] for nbest_hyp in batch_nbest]

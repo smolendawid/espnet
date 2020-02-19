@@ -35,6 +35,8 @@ import espnet.lm.pytorch_backend.extlm as extlm_pytorch
 from espnet.nets.asr_interface import ASRInterface
 from espnet.nets.pytorch_backend.e2e_asr import pad_list
 from espnet.nets.pytorch_backend.e2e_asr_mix import E2E
+from espnet.nets.pytorch_backend.e2e_asr_transducer_mix import E2E
+from espnet.nets.pytorch_backend.e2e_asr_transducer import E2E
 import espnet.nets.pytorch_backend.lm.default as lm_pytorch
 from espnet.utils.deterministic_utils import set_deterministic_pytorch
 from espnet.utils.io_utils import LoadInputsAndTargets
@@ -45,6 +47,7 @@ from espnet.utils.training.iterators import ToggleableShufflingSerialIterator
 from espnet.utils.training.tensorboard_logger import TensorboardLogger
 from espnet.utils.training.train_utils import check_early_stop
 from espnet.utils.training.train_utils import set_early_stop
+from espnet.utils.dynamic_import import dynamic_import
 
 import matplotlib
 matplotlib.use('Agg')
@@ -138,19 +141,28 @@ def train(args):
     logging.info('#input dims : ' + str(idim))
     logging.info('#output dims: ' + str(odim))
 
-    # specify attention, CTC, hybrid mode
+    # specify attention, CTC, RNNT or hybrid mode
     if args.mtlalpha == 1.0:
-        mtl_mode = 'ctc'
-        logging.info('Pure CTC mode')
+        if args.aligner == 'rnnt':
+            mtl_mode = 'rnnt'
+            logging.info('Pure RNNT mode')
+        else:
+            mtl_mode = 'ctc'
+            logging.info('Pure CTC mode')
     elif args.mtlalpha == 0.0:
         mtl_mode = 'att'
         logging.info('Pure attention mode')
     else:
         mtl_mode = 'mtl'
-        logging.info('Multitask learning mode')
+        if args.aligner == 'rnnt':
+            logging.info('Multitask learning mode with RNNT')
+        else:
+            logging.info('Multitask learning mode with CTC')
 
     # specify model architecture
-    model = E2E(idim, odim, args)
+    model_class = dynamic_import(args.model_module)
+    model = model_class(idim, odim, args)
+
     subsampling_factor = model.subsample[0]
 
     if args.rnnlm is not None:
@@ -330,7 +342,7 @@ def train(args):
     # Save best models
     trainer.extend(snapshot_object(model, 'model.loss.best'),
                    trigger=training.triggers.MinValueTrigger('validation/main/loss'))
-    if mtl_mode != 'ctc':
+    if mtl_mode == 'mtl' or mtl_mode == 'att':
         trainer.extend(snapshot_object(model, 'model.acc.best'),
                        trigger=training.triggers.MaxValueTrigger('validation/main/acc'))
 
@@ -339,7 +351,7 @@ def train(args):
 
     # epsilon decay in the optimizer
     if args.opt == 'adadelta':
-        if args.criterion == 'acc' and mtl_mode != 'ctc':
+        if args.criterion == 'acc' and (mtl_mode == 'mtl' or mtl_mode == 'att'):
             trainer.extend(restore_snapshot(model, args.outdir + '/model.acc.best', load_fn=torch_load),
                            trigger=CompareValueTrigger(
                                'validation/main/acc',
@@ -451,7 +463,7 @@ def recog(args):
 
     if args.batchsize == 0:
         with torch.no_grad():
-            for idx, name in enumerate(js.keys(), 1):
+            for idx, name in enumerate(list(js.keys())[:2], 1):
                 logging.info('(%d/%d) decoding ' + name, idx, len(js.keys()))
                 batch = [(name, js[name])]
                 feat = load_inputs_and_targets(batch)[0][0]
